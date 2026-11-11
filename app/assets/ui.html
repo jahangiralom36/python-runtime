@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>APK Studio</title>
+<style>
+:root{--bg:#f3f4f8;--card:#fff;--ink:#1b2130;--mut:#6b7389;--line:#e2e6ef;--pri:#3b5bdb;--red:#e03131;--grn:#2b8a3e}
+@media(prefers-color-scheme:dark){:root{--bg:#10131a;--card:#1a1f29;--ink:#e8ebf3;--mut:#9aa3b8;--line:#2a3140;--pri:#6c86ff;--red:#ff6b6b;--grn:#51cf66}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,"Noto Sans Bengali",sans-serif;display:flex;flex-direction:column}
+#top{background:var(--card);border-bottom:1px solid var(--line);padding:10px 14px;display:flex;align-items:center;gap:10px;padding-top:max(10px,env(safe-area-inset-top))}
+#top b{font-size:17px}#top .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--mut);font-size:13px}
+#chg{background:var(--pri);color:#fff;border-radius:99px;padding:2px 10px;font-size:12px;display:none}
+#tabs{display:none;overflow-x:auto;white-space:nowrap;background:var(--card);border-bottom:1px solid var(--line);padding:6px 8px;gap:6px}
+#tabs button{flex:0 0 auto;background:transparent;color:var(--ink);border:1px solid var(--line);border-radius:99px;padding:6px 13px;font:inherit;font-size:14px}
+#tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri)}
+#main{flex:1;overflow:auto;padding:12px 12px 40px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px}
+button{font:inherit}
+.btn{background:var(--pri);color:#fff;border:0;border-radius:10px;padding:9px 14px}
+.btn.sec{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn.del{background:var(--red)}.btn.sm{padding:6px 10px;font-size:13px}.btn:disabled{opacity:.5}
+.btn.big{width:100%;padding:14px;font-size:17px}
+input[type=text],input[type=password],textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit}
+.u{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;word-break:break-all}
+.b{display:inline-block;font-size:11px;padding:1px 8px;border-radius:99px;background:var(--bg);border:1px solid var(--line);color:var(--mut);margin:2px 3px 2px 0}
+.b.ok{color:var(--grn);border-color:var(--grn)}.b.rm{color:var(--red);border-color:var(--red)}
+.mut{color:var(--mut);font-size:13px}
+.row{display:flex;gap:8px;align-items:center;margin-top:8px}.row>input{flex:1}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px}
+.im{border:1px solid var(--line);border-radius:12px;padding:8px;text-align:center;font-size:11px;word-break:break-all;background:var(--card)}
+.im .th{height:72px;display:flex;align-items:center;justify-content:center;background:repeating-conic-gradient(#8883 0 25%,transparent 0 50%) 0 0/12px 12px;border-radius:8px;margin-bottom:5px}
+.im img{max-width:100%;max-height:72px}
+.note{background:rgba(240,140,0,.12);border:1px solid rgba(240,140,0,.45);border-radius:10px;padding:9px 11px;font-size:13px;margin-bottom:10px}
+pre{background:#0d1117;color:#c9d1d9;padding:10px;border-radius:10px;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:260px;overflow:auto}
+label.ck{display:flex;gap:8px;align-items:center;font-size:14px}
+input[type=color]{width:42px;height:38px;border:1px solid var(--line);border-radius:8px;padding:0;background:none}
+.hero{text-align:center;padding:30px 10px}.hero .ic{font-size:64px}
+.hero h2{margin:6px 0}
+.perm{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;font-family:ui-monospace,monospace;word-break:break-all}
+.perm:last-child{border:0}
+.spin{display:inline-block;width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--pri);border-radius:50%;animation:s 1s linear infinite;vertical-align:-3px;margin-right:6px}
+@keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="top"><b>📱 APK Studio</b><span class="nm" id="nm"></span><span id="chg"></span></div>
+<div id="tabs"></div>
+<div id="main"></div>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let S=null, ops=[], TAB='urls', BUSY=false, built=null;
+
+/* ---------- native bridge ---------- */
+const cbs={};let cbn=0;
+function nat(method,args){return new Promise((res,rej)=>{const id=++cbn;cbs[id]={res,rej};Android.call(method,JSON.stringify(args||{}),String(id))})}
+window.__cb=(id,ok,payload)=>{const c=cbs[id];if(!c)return;delete cbs[id];if(ok){try{c.res(JSON.parse(payload))}catch(e){c.res(payload)}}else c.rej(new Error(payload))};
+window.__prog=m=>{const l=$('#log');if(l){l.textContent+=m+'\n';l.scrollTop=l.scrollHeight}};
+window.__back=()=>{if(S&&TAB!=='urls'){tab('urls');return true}return false};
+
+/* ---------- ops ---------- */
+const keyOf=o=>o.t+':'+(o.t==='str'?o.old+'|'+!!o.exact:o.t==='delperm'?o.name:o.t==='delfile'||o.t==='repfile'?o.path:o.pos);
+function setOp(o){ops=ops.filter(x=>keyOf(x)!==keyOf(o));ops.push(o);built=null;upd()}
+function delIdx(i){ops.splice(i,1);built=null;upd()}
+function delOp(k){ops=ops.filter(x=>keyOf(x)!==k);built=null;upd()}
+const getOp=(t,v)=>ops.find(o=>o.t===t&&(t==='str'?o.old===v&&!o.exact:t==='delperm'?o.name===v:t==='delfile'||t==='repfile'?o.path===v:o.pos===v));
+function upd(){const c=$('#chg');c.style.display=ops.length?'':'none';c.textContent=ops.length+' পরিবর্তন';tab(TAB,true)}
+function effUrl(u){for(const o of ops)if(o.t==='str'&&!o.exact&&u.includes(o.old))u=u.split(o.old).join(o.new);return u}
+const toast=m=>{let t=$('#toast');if(!t){t=document.createElement('div');t.id='toast';t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:10px;z-index:9;font-size:14px;transition:.2s';document.body.appendChild(t)}t.textContent=m;t.style.opacity=1;clearTimeout(toast.t);toast.t=setTimeout(()=>t.style.opacity=0,2200)};
+const fail=e=>{BUSY=false;toast('❌ '+e.message);console.log(e)};
+
+/* ---------- home ---------- */
+function home(){S=null;ops=[];built=null;$('#tabs').style.display='none';$('#nm').textContent='';$('#chg').style.display='none';
+  $('#main').innerHTML=`<div class="hero"><div class="ic">📦</div><h2>APK এডিট করুন</h2>
+  <p class="mut">যেকোনো APK বেছে নিন — ভেতরের <b>URL, অ্যাপের নাম, টেক্সট, রং, আইকন/ছবি, পারমিশন</b> বদলে নতুন সাইন করা APK বানান। সোর্স কোড লাগবে না। সবকিছু আপনার ফোনেই হয়, কোথাও আপলোড হয় না।</p>
+  <button class="btn big" onclick="pick()">📂 APK ফাইল বাছুন</button></div>
+  <div class="note">⚠ শুধু নিজের অ্যাপ বা যে অ্যাপ বদলানোর অনুমতি আছে সেটাতেই ব্যবহার করুন।</div>`}
+async function pick(){
+  try{const r=await nat('pickApk');if(r.cancelled)return;
+  $('#main').innerHTML=`<div class="card"><span class="spin"></span>${esc(r.name)} স্ক্যান হচ্ছে... (বড় অ্যাপে কিছুক্ষণ লাগে)</div>`;
+  S=await nat('scan');S.name=r.name;ops=[];built=null;$('#nm').textContent=r.name;$('#tabs').style.display='flex';TAB='urls';tab('urls')}catch(e){fail(e);home()}}
+
+/* ---------- tabs ---------- */
+const TABS=[['urls','🔗 লিংক'],['text','✏️ টেক্সট'],['color','🎨 রং'],['img','🖼️ ছবি'],['perm','🔐 পারমিশন'],['find','🔎 খুঁজুন'],['build','📦 বিল্ড']];
+function tab(t,keep){TAB=t;if(!S)return;const sc=keep?$('#main').scrollTop:0;
+  $('#tabs').innerHTML=TABS.map(([k,l])=>`<button class="${k===t?'on':''}" onclick="tab('${k}')">${l}</button>`).join('')+`<button onclick="if(confirm('নতুন APK বাছতে চান? অসেভ পরিবর্তন হারাবে।'))home()">↩ নতুন APK</button>`;
+  ({urls:vUrls,text:vText,color:vColor,img:vImg,perm:vPerm,find:vFind,build:vBuild})[t]();$('#main').scrollTop=sc}
+
+/* URLs */
+const NOISE=['schemas.android.com','www.w3.org','xmlpull.org','apache.org','developer.android.com','docs.oracle.com','purl.org','ns.adobe.com','example.com','localhost'];
+let uq='',unoise=false;
+function vUrls(){
+  const all=S.urls.map(u=>({...u,noise:NOISE.some(n=>u.url.includes(n))}));
+  const l=all.filter(u=>(unoise||!u.noise)&&(effUrl(u.url)+u.url).toLowerCase().includes(uq.toLowerCase()));
+  $('#main').innerHTML=`<div class="card"><b>পুরো ডোমেইন একসাথে বদলান</b><div class="mut">যেমন https://old.com → https://new.com (কোড, রিসোর্স, ম্যানিফেস্ট, assets সব জায়গায়)</div>
+  <div class="row"><input type="text" id="bo" placeholder="পুরনো, যেমন https://old.com"></div><div class="row"><input type="text" id="bn" placeholder="নতুন, যেমন https://new.com"><button class="btn" onclick="bulk()">বদলান</button></div></div>
+  <div class="card"><input type="text" id="uq" placeholder="🔎 ফিল্টার..." value="${esc(uq)}" oninput="uq=this.value;clearTimeout(window._t);window._t=setTimeout(()=>{vUrls();const i=$('#uq');i.focus();i.setSelectionRange(99,99)},300)">
+  <label class="ck" style="margin-top:8px"><input type="checkbox" ${unoise?'checked':''} onchange="unoise=this.checked;vUrls()"> সিস্টেম/লাইব্রেরির লিংকও দেখান</label><div class="mut" style="margin-top:4px">${l.length} টি লিংক</div></div>`+
+  l.slice(0,300).map((u,i)=>{const e=effUrl(u.url),ch=e!==u.url,op=getOp('str',u.url);
+   return `<div class="card"><div class="u">${esc(u.url)}</div><div>${u.where.map(w=>`<span class="b">${esc(w)}</span>`).join('')}<span class="b">${u.count}×</span>${ch?'<span class="b ok">✓ পরিবর্তিত</span>':''}</div>
+   <div class="row"><input type="text" id="u${i}" value="${esc(e)}"><button class="btn sm" onclick="saveUrl(${i})">সেভ</button></div>
+   ${op?`<div class="row"><button class="btn sec sm" onclick="delIdx(${ops.indexOf(op)})">↺ ফিরিয়ে নিন</button></div>`:''}</div>`}).join('')+(l.length>300?'<p class="mut">আরও আছে — ফিল্টার ব্যবহার করুন</p>':'');
+  window._ul=l}
+function saveUrl(i){const u=window._ul[i],v=$('#u'+i).value.trim();if(!v||v===effUrl(u.url))return toast('কিছু বদলায়নি');setOp({t:'str',old:u.url,new:v,exact:false});toast('✅ যোগ হয়েছে — বিল্ড ট্যাবে গিয়ে তৈরি করুন')}
+function bulk(){const o=$('#bo').value.trim(),n=$('#bn').value.trim();if(!o||!n)return toast('দুটো ঘরই পূরণ করুন');setOp({t:'str',old:o,new:n,exact:false});toast('✅ যোগ হয়েছে')}
+
+/* Texts */
+let tq='';
+function vText(){
+  const lab=S.label||{},l=S.strings.filter(s=>(s.name+s.value).toLowerCase().includes(tq.toLowerCase()));
+  $('#main').innerHTML=(lab.value?`<div class="card"><b>অ্যাপের নাম</b> <span class="mut">(হোম স্ক্রিনে যা দেখায়)</span>
+  <div class="row"><input type="text" id="lab" value="${esc(labelNow())}"><button class="btn sm" onclick="saveLabel()">সেভ</button></div></div>`:'')+
+  `<div class="card"><input type="text" id="tq" placeholder="🔎 নাম বা লেখা খুঁজুন..." value="${esc(tq)}" oninput="tq=this.value;clearTimeout(window._t);window._t=setTimeout(()=>{vText();const i=$('#tq');i.focus();i.setSelectionRange(99,99)},300)"><div class="mut" style="margin-top:4px">${l.length} টি টেক্সট। (সাজানো টেক্সট/bold থাকলে সেভ করলে সাধারণ টেক্সট হবে)</div></div>`+
+  l.slice(0,250).map((s,i)=>{const op=getOp('resstr',s.pos);return `<div class="card"><div class="u"><b>${esc(s.name)}</b> <span class="b">${esc(s.cfg)}</span>${op?'<span class="b ok">✓ পরিবর্তিত</span>':''}</div>
+   <textarea id="t${i}" rows="2" style="margin-top:6px">${esc(op?op.value:s.value)}</textarea>
+   <div class="row"><button class="btn sm" onclick="saveText(${i})">সেভ</button>${op?`<button class="btn sec sm" onclick="delIdx(${ops.indexOf(op)})">↺ ফিরিয়ে নিন</button>`:''}</div></div>`}).join('');
+  window._tl=l}
+function labelNow(){const l=S.label;if(l.pos>=0){const o=getOp('resstr',l.pos);return o?o.value:l.value}const o=ops.find(o=>o.t==='str'&&o.exact&&o.old===l.value);return o?o.new:l.value}
+function saveLabel(){const v=$('#lab').value,l=S.label;if(!v.trim())return;if(l.pos>=0)setOp({t:'resstr',pos:l.pos,value:v});else setOp({t:'str',old:l.value,new:v,exact:true});toast('✅ যোগ হয়েছে')}
+function saveText(i){const s=window._tl[i];setOp({t:'resstr',pos:s.pos,value:$('#t'+i).value});toast('✅ যোগ হয়েছে')}
+
+/* Colors */
+function vColor(){
+  $('#main').innerHTML=(S.colors.length?'':'<div class="card mut">কোনো রং পাওয়া যায়নি</div>')+S.colors.slice(0,300).map((c,i)=>{const op=getOp('rescolor',c.pos),v=op?op.value:c.value,hex=/^#[0-9a-f]{6,8}$/i.test(v)?'#'+v.slice(-6):'#000000';
+   return `<div class="card"><div class="u"><b>${esc(c.name)}</b> <span class="b">${esc(c.cfg)}</span>${op?'<span class="b ok">✓ পরিবর্তিত</span>':''}</div>
+   <div class="row"><input type="color" value="${hex}" oninput="$('#c${i}').value=(($('#c${i}').value.length===9?$('#c${i}').value.slice(0,3):'#')+this.value.slice(1)).toUpperCase()"><input type="text" id="c${i}" value="${esc(v)}">
+   <button class="btn sm" onclick="saveColor(${i})">সেভ</button>${op?`<button class="btn sec sm" onclick="delIdx(${ops.indexOf(op)})">↺</button>`:''}</div></div>`}).join('')}
+function saveColor(i){const v=$('#c'+i).value.trim();if(!/^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(v))return toast('ফরম্যাট #RRGGBB বা #AARRGGBB');setOp({t:'rescolor',pos:S.colors[i].pos,value:v});toast('✅ যোগ হয়েছে')}
+
+/* Images */
+let iq='';
+function vImg(){
+  const l=S.images.filter(x=>x.path.toLowerCase().includes(iq.toLowerCase())).sort((a,b)=>rank(a)-rank(b));
+  function rank(x){const n=x.path.toLowerCase();return n.includes('launcher')?0:/icon|logo|splash/.test(n)?1:2}
+  $('#main').innerHTML=`<div class="card"><b>এক ছবি → সব লঞ্চার আইকন</b><div class="mut">ছবি বাছলে প্রতিটি ic_launcher ফাইলের মাপে নিজে নিজে ফিট হবে।</div><div class="row"><button class="btn" onclick="allIcons()">🖼️ ছবি বেছে সব আইকন বদলান</button></div></div>
+  <div class="card"><input type="text" placeholder="🔎 ফিল্টার (logo, splash...)" value="${esc(iq)}" oninput="iq=this.value;clearTimeout(window._t);window._t=setTimeout(()=>{vImg();const i=$('#main input');i.focus();i.setSelectionRange(99,99)},300)"><div class="mut" style="margin-top:4px">${l.length} টি ছবি</div></div>
+  <div class="grid">`+l.slice(0,200).map((x,i)=>{const r=getOp('repfile',x.path),d=getOp('delfile',x.path);
+   const src=r?`https://apk.local/tmp?f=${encodeURIComponent(r.token)}`:`https://apk.local/img?path=${encodeURIComponent(x.path)}`;
+   return `<div class="im" style="${d?'opacity:.45':''}"><div class="th"><img loading="lazy" src="${src}"></div>${esc(x.path.replace(/^res\//,''))}<br>${r?'<span class="b ok">বদলানো</span>':''}${d?'<span class="b rm">মুছবে</span>':''}
+   <div class="row" style="justify-content:center"><button class="btn sm" onclick="repImg(${i})">বদলান</button>${d?`<button class="btn sec sm" onclick="delIdx(${ops.indexOf(d)})">↺</button>`:`<button class="btn del sm" onclick="setOp({t:'delfile',path:window._il[${i}].path})">✕</button>`}${r?`<button class="btn sec sm" onclick="delIdx(${ops.indexOf(r)})">↺</button>`:''}</div></div>`}).join('')+'</div>';
+  window._il=l}
+async function repImg(i){try{const p=window._il[i].path,r=await nat('pickImage',{paths:[p]});if(r.cancelled)return;setOp({t:'repfile',path:p,token:r[p]})}catch(e){fail(e)}}
+async function allIcons(){try{const ps=S.images.filter(x=>/launcher/i.test(x.path)&&/\.(png|webp|jpe?g)$/i.test(x.path)).map(x=>x.path);if(!ps.length)return toast('লঞ্চার আইকন পাওয়া যায়নি');
+  const r=await nat('pickImage',{paths:ps});if(r.cancelled)return;ps.forEach(p=>{ops=ops.filter(o=>keyOf(o)!==keyOf({t:'repfile',path:p}));ops.push({t:'repfile',path:p,token:r[p]})});built=null;upd();toast('✅ '+ps.length+' টি আইকন যোগ হয়েছে')}catch(e){fail(e)}}
+
+/* Permissions */
+function vPerm(){
+  $('#main').innerHTML=`<div class="card"><b>পারমিশন</b><div class="mut">যেটা সরাতে চান সেটার পাশে ✕ চাপুন। (দরকারি পারমিশন সরালে অ্যাপ ঠিকমতো না-ও চলতে পারে)</div>`+
+  (S.perms.map((p,i)=>{const d=getOp('delperm',p);return `<div class="perm"><span style="flex:1;${d?'text-decoration:line-through;opacity:.5':''}">${esc(p)}</span>${d?`<button class="btn sec sm" onclick="delIdx(${ops.indexOf(d)})">↺</button>`:`<button class="btn del sm" onclick="setOp({t:'delperm',name:S.perms[${i}]})">✕</button>`}</div>`}).join('')||'<p class="mut">কোনো পারমিশন নেই</p>')+`</div>
+  <div class="card mut">প্যাকেজ: <span class="u">${esc(S.package)}</span><br>ভার্সন: ${esc(S.versionName)} · minSdk: ${esc(S.minSdk)}</div>`}
+
+/* Find */
+async function vFind(){
+  $('#main').innerHTML=`<div class="card"><div class="mut">কোড, রিসোর্স, ম্যানিফেস্ট ও assets এর সব টেক্সটে খুঁজে বদলান — AdMob ID, API key, Firebase URL, ইমেইল ইত্যাদির জন্য।</div>
+  <div class="row"><input type="text" id="fq" placeholder="যা খুঁজবেন"><button class="btn" onclick="doFind()">খুঁজুন</button></div>
+  <div class="row"><input type="text" id="fr" placeholder="যা দিয়ে বদলাবেন"><button class="btn" onclick="addRepl()">বদলান</button></div></div><div id="fres"></div>`}
+async function doFind(){const q=$('#fq').value;if(!q)return;$('#fres').innerHTML='<div class="card"><span class="spin"></span>খোঁজা হচ্ছে...</div>';
+  try{const r=await nat('search',{q});$('#fres').innerHTML=`<div class="mut" style="margin:4px 4px 8px">${r.results.length} টি ফাইলে পাওয়া গেছে</div>`+r.results.map(x=>`<div class="card"><span class="u"><b>${esc(x.where)}</b></span> <span class="b">${x.count}×</span><div class="u mut">${esc(x.sample)}</div></div>`).join('')}catch(e){fail(e)}}
+function addRepl(){const q=$('#fq').value,r=$('#fr').value;if(!q)return toast('খুঁজুন ঘর খালি');setOp({t:'str',old:q,new:r,exact:false});toast('✅ যোগ হয়েছে ('+q.slice(0,20)+' → '+r.slice(0,20)+')')}
+
+/* Build */
+let ks={use:false,name:'',alias:'',pass:'',keyPass:''};
+function desc(o){return o.t==='str'?`টেক্সট/লিংক: ${o.old.slice(0,40)} → ${o.new.slice(0,40)}`:o.t==='resstr'?`রিসোর্স টেক্সট #${o.pos}: ${o.value.slice(0,40)}`:o.t==='rescolor'?`রং #${o.pos}: ${o.value}`:o.t==='delperm'?`পারমিশন সরানো: ${o.name.split('.').pop()}`:o.t==='delfile'?`ফাইল মোছা: ${o.path}`:`ছবি বদল: ${o.path}`}
+function vBuild(){
+  $('#main').innerHTML=`<div class="card"><b>পরিবর্তনের তালিকা (${ops.length})</b>${ops.map((o,i)=>`<div class="perm"><span style="flex:1;font-family:inherit">${esc(desc(o))}</span><button class="btn sec sm" onclick="delIdx(${i})">✕</button></div>`).join('')||'<p class="mut">এখনো কোনো পরিবর্তন নেই</p>'}</div>
+  <div class="card"><label class="ck"><input type="checkbox" ${ks.use?'checked':''} onchange="ks.use=this.checked;vBuild()"> নিজের keystore (.p12 / .pfx) দিয়ে সাইন করব</label>
+  ${ks.use?`<div class="row"><button class="btn sec sm" onclick="pickKs()">📂 keystore বাছুন</button><span class="mut">${esc(ks.name)}</span></div><div class="row"><input type="text" placeholder="alias (ফাঁকা = প্রথমটি)" value="${esc(ks.alias)}" oninput="ks.alias=this.value"></div><div class="row"><input type="password" placeholder="keystore password" value="${esc(ks.pass)}" oninput="ks.pass=this.value"></div><div class="row"><input type="password" placeholder="key password (একই হলে ফাঁকা)" value="${esc(ks.keyPass)}" oninput="ks.keyPass=this.value"></div>`:`<div class="mut" style="margin-top:6px">ডিফল্ট key ব্যবহার হবে। এতে আগের ইনস্টল করা অ্যাপের ওপর আপডেট হয় না — আগে পুরনোটা আনইনস্টল করুন।</div>`}</div>
+  <button class="btn big" id="bb" onclick="doBuild()">🔨 APK তৈরি করুন</button>
+  <pre id="log" style="display:none;margin-top:10px"></pre><div id="bres"></div>`;
+  if(built)showDone()}
+async function pickKs(){try{const r=await nat('pickKeystore');if(!r.cancelled){ks.name=r.name;vBuild()}}catch(e){fail(e)}}
+async function doBuild(){if(BUSY)return;if(ks.use&&!ks.name)return toast('আগে keystore বাছুন');BUSY=true;built=null;
+  $('#bb').disabled=true;const l=$('#log');l.style.display='block';l.textContent='';$('#bres').innerHTML='';
+  try{const r=await nat('build',{ops,ks});built=r;BUSY=false;$('#bb').disabled=false;showDone()}catch(e){BUSY=false;$('#bb').disabled=false;l.textContent+='❌ '+e.message+'\n'}}
+function showDone(){$('#bres').innerHTML=`<div class="card" style="margin-top:10px"><b>✅ তৈরি হয়েছে (${(built.size/1048576).toFixed(1)} MB)</b>
+  <div class="row"><button class="btn" onclick="act('save')">💾 সেভ করুন</button><button class="btn" onclick="act('install')">⬇ ইনস্টল</button><button class="btn sec" onclick="act('share')">↗ শেয়ার</button></div></div>`}
+async function act(m){try{const r=await nat(m);if(r.needPermission)toast('সেটিংসে "এই উৎস থেকে ইনস্টল" চালু করে আবার চাপুন');else if(r.saved)toast('✅ সেভ হয়েছে')}catch(e){fail(e)}}
+
+home();
+</script>
+</body>
+</html>
