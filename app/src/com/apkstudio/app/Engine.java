@@ -187,6 +187,38 @@ final class Engine {
         return new JSONObject().put("results", res);
     }
 
+    /** কনফিগ/টেক্সট ফাইলের তালিকা (res/ এর বাইনারি XML ও AndroidManifest বাদ দিয়ে)। */
+    static JSONObject listFiles(File apk, String q) throws Exception {
+        JSONArray arr = new JSONArray();
+        String ql = q == null ? "" : q.toLowerCase(Locale.ROOT);
+        ZipFile z = new ZipFile(apk);
+        try {
+            Enumeration<? extends ZipEntry> en = z.entries();
+            while (en.hasMoreElements()) {
+                ZipEntry e = en.nextElement();
+                if (!isTextAsset(e)) continue;
+                String n = e.getName();
+                if (ql.length() > 0 && !n.toLowerCase(Locale.ROOT).contains(ql)) continue;
+                arr.put(new JSONObject().put("path", n).put("size", e.getSize()));
+                if (arr.length() >= 800) break;
+            }
+        } finally { z.close(); }
+        return new JSONObject().put("files", arr);
+    }
+
+    /** একটা ফাইলের টেক্সট কন্টেন্ট পড়ে (বাইনারি হলে এরর)। */
+    static String readText(File apk, String path) throws Exception {
+        ZipFile z = new ZipFile(apk);
+        try {
+            ZipEntry e = z.getEntry(path);
+            if (e == null) throw new FileNotFoundException("ফাইল নেই: " + path);
+            if (e.getSize() > MAX_TEXT) throw new IOException("ফাইলটি খুব বড়, এডিটরে খোলা যাবে না");
+            byte[] b = read(z, e);
+            if (!looksText(b)) throw new IOException("এটি বাইনারি ফাইল, টেক্সট এডিটরে খোলা যাবে না");
+            return new String(b, ResPool.U8);
+        } finally { z.close(); }
+    }
+
     // ------------------------------------------------------------------ build
     static final class CountingOut extends FilterOutputStream {
         long count;
@@ -209,6 +241,7 @@ final class Engine {
         List<ResOp> resOps = new ArrayList<ResOp>();
         Set<String> delPerms = new HashSet<String>(), delFiles = new HashSet<String>();
         Map<String, File> repFiles = new HashMap<String, File>();
+        Map<String, String> textOverrides = new LinkedHashMap<String, String>();
         for (int i = 0; i < ops.length(); i++) {
             JSONObject o = ops.getJSONObject(i);
             String t = o.getString("t");
@@ -223,6 +256,7 @@ final class Engine {
             } else if (t.equals("delperm")) delPerms.add(o.getString("name"));
             else if (t.equals("delfile")) delFiles.add(o.getString("path"));
             else if (t.equals("repfile")) repFiles.put(o.getString("path"), new File(pickedDir, new File(o.getString("token")).getName()));
+            else if (t.equals("textfile")) textOverrides.put(o.getString("path"), o.getString("content"));
         }
         List<byte[]> needles = new ArrayList<byte[]>();
         for (StrOp s : strOps) needles.add(s.old.getBytes(ResPool.U8));
@@ -243,7 +277,10 @@ final class Engine {
                 if (delFiles.contains(name)) { log.log("মুছে ফেলা: " + name); continue; }
                 byte[] data = null;
                 try {
-                    if (repFiles.containsKey(name)) {
+                    if (textOverrides.containsKey(name)) {
+                        data = textOverrides.get(name).getBytes(ResPool.U8);
+                        log.log("কনফিগ ফাইল এডিট: " + name);
+                    } else if (repFiles.containsKey(name)) {
                         data = readFile(repFiles.get(name));
                         log.log("বদলানো: " + name);
                     } else if (isDex(name) && !strOps.isEmpty()) {
@@ -289,6 +326,13 @@ final class Engine {
                     ZipEntry ne = new ZipEntry(r.getKey());
                     writeEntry(zos, cos, z, ne, readFile(r.getValue()));
                     log.log("যোগ: " + r.getKey());
+                }
+            }
+            for (Map.Entry<String, String> t : textOverrides.entrySet()) {
+                if (z.getEntry(t.getKey()) == null) { // নতুন কনফিগ ফাইল যোগ
+                    ZipEntry ne = new ZipEntry(t.getKey());
+                    writeEntry(zos, cos, z, ne, t.getValue().getBytes(ResPool.U8));
+                    log.log("যোগ: " + t.getKey());
                 }
             }
         } finally {

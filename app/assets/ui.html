@@ -85,10 +85,10 @@ async function pick(){
   S=await nat('scan');S.name=r.name;ops=[];built=null;$('#nm').textContent=r.name;$('#tabs').style.display='flex';TAB='urls';tab('urls')}catch(e){fail(e);home()}}
 
 /* ---------- tabs ---------- */
-const TABS=[['urls','🔗 লিংক'],['text','✏️ টেক্সট'],['color','🎨 রং'],['img','🖼️ ছবি'],['perm','🔐 পারমিশন'],['find','🔎 খুঁজুন'],['build','📦 বিল্ড']];
+const TABS=[['urls','🔗 লিংক'],['text','✏️ টেক্সট'],['color','🎨 রং'],['img','🖼️ ছবি'],['perm','🔐 পারমিশন'],['find','🔎 খুঁজুন'],['files','📁 ফাইল'],['build','📦 বিল্ড']];
 function tab(t,keep){TAB=t;if(!S)return;const sc=keep?$('#main').scrollTop:0;
   $('#tabs').innerHTML=TABS.map(([k,l])=>`<button class="${k===t?'on':''}" onclick="tab('${k}')">${l}</button>`).join('')+`<button onclick="if(confirm('নতুন APK বাছতে চান? অসেভ পরিবর্তন হারাবে।'))home()">↩ নতুন APK</button>`;
-  ({urls:vUrls,text:vText,color:vColor,img:vImg,perm:vPerm,find:vFind,build:vBuild})[t]();$('#main').scrollTop=sc}
+  ({urls:vUrls,text:vText,color:vColor,img:vImg,perm:vPerm,find:vFind,files:vFiles,build:vBuild})[t]();$('#main').scrollTop=sc}
 
 /* URLs */
 const NOISE=['schemas.android.com','www.w3.org','xmlpull.org','apache.org','developer.android.com','docs.oracle.com','purl.org','ns.adobe.com','example.com','localhost'];
@@ -162,9 +162,40 @@ async function doFind(){const q=$('#fq').value;if(!q)return;$('#fres').innerHTML
   try{const r=await nat('search',{q});$('#fres').innerHTML=`<div class="mut" style="margin:4px 4px 8px">${r.results.length} টি ফাইলে পাওয়া গেছে</div>`+r.results.map(x=>`<div class="card"><span class="u"><b>${esc(x.where)}</b></span> <span class="b">${x.count}×</span><div class="u mut">${esc(x.sample)}</div></div>`).join('')}catch(e){fail(e)}}
 function addRepl(){const q=$('#fq').value,r=$('#fr').value;if(!q)return toast('খুঁজুন ঘর খালি');setOp({t:'str',old:q,new:r,exact:false});toast('✅ যোগ হয়েছে ('+q.slice(0,20)+' → '+r.slice(0,20)+')')}
 
+/* Files (raw config editor) */
+let fq='',fcur=null,fcurText='';
+async function vFiles(){
+  $('#main').innerHTML=`<div class="card"><b>কনফিগ/টেক্সট ফাইল সরাসরি এডিট</b><div class="mut">base_url, api endpoint, google-services.json, .properties ইত্যাদি যেকোনো টেক্সট ফাইল এখানে পুরোটা খুলে বদলানো যায়।</div>
+  <div class="row"><input type="text" id="fq2" placeholder="🔎 ফাইলের নাম খুঁজুন (config, json, url...)" value="${esc(fq)}" oninput="fq=this.value;clearTimeout(window._t);window._t=setTimeout(()=>{vFiles();const i=$('#fq2');i&&i.focus();i&&i.setSelectionRange(99,99)},300)"><div class="mut" id="fcount" style="margin-top:4px">লোড হচ্ছে...</div></div></div>
+  <div id="flist"></div><div id="fed"></div>`;
+  try{const r=await nat('listFiles',{q:fq});window._fl=r.files;
+    $('#fcount').textContent=r.files.length+' টি ফাইল';
+    $('#flist').innerHTML=r.files.map((x,i)=>{const op=ops.find(o=>o.t==='textfile'&&o.path===x.path);
+      return `<div class="card" style="padding:9px 12px;display:flex;align-items:center;gap:8px"><div class="u" style="flex:1;cursor:pointer" onclick="openFile(${i})">${esc(x.path)}</div>${op?'<span class="b ok">✓ পরিবর্তিত</span>':''}</div>`}).join('')||'<div class="card mut">কোনো টেক্সট/কনফিগ ফাইল পাওয়া যায়নি</div>';
+  }catch(e){fail(e)}
+}
+async function openFile(i){
+  const x=window._fl[i];fcur=x.path;
+  const op=ops.find(o=>o.t==='textfile'&&o.path===fcur);
+  $('#fed').innerHTML=`<div class="card"><span class="spin"></span>লোড হচ্ছে...</div>`;
+  try{
+    const text=op?op.content:(await nat('readFile',{path:fcur})).text;
+    fcurText=text;
+    $('#fed').innerHTML=`<div class="card"><b class="u">${esc(fcur)}</b>
+    <textarea id="ftext" rows="14" spellcheck="false" style="margin-top:8px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">${esc(text)}</textarea>
+    <div class="row"><button class="btn sm" onclick="saveFileEdit()">সেভ</button><button class="btn sec sm" onclick="fcur=null;$('#fed').innerHTML=''">বন্ধ</button></div></div>`;
+  }catch(e){$('#fed').innerHTML=`<div class="card" style="color:var(--red)">খোলা যায়নি: ${esc(e.message)}</div>`}
+}
+function saveFileEdit(){
+  const v=$('#ftext').value;
+  if(v===fcurText)return toast('কিছু বদলায়নি');
+  ops=ops.filter(o=>!(o.t==='textfile'&&o.path===fcur));
+  ops.push({t:'textfile',path:fcur,content:v});built=null;upd();toast('✅ যোগ হয়েছে');
+}
+
 /* Build */
 let ks={use:false,name:'',alias:'',pass:'',keyPass:''};
-function desc(o){return o.t==='str'?`টেক্সট/লিংক: ${o.old.slice(0,40)} → ${o.new.slice(0,40)}`:o.t==='resstr'?`রিসোর্স টেক্সট #${o.pos}: ${o.value.slice(0,40)}`:o.t==='rescolor'?`রং #${o.pos}: ${o.value}`:o.t==='delperm'?`পারমিশন সরানো: ${o.name.split('.').pop()}`:o.t==='delfile'?`ফাইল মোছা: ${o.path}`:`ছবি বদল: ${o.path}`}
+function desc(o){return o.t==='str'?`টেক্সট/লিংক: ${o.old.slice(0,40)} → ${o.new.slice(0,40)}`:o.t==='resstr'?`রিসোর্স টেক্সট #${o.pos}: ${o.value.slice(0,40)}`:o.t==='rescolor'?`রং #${o.pos}: ${o.value}`:o.t==='delperm'?`পারমিশন সরানো: ${o.name.split('.').pop()}`:o.t==='delfile'?`ফাইল মোছা: ${o.path}`:o.t==='textfile'?`কনফিগ ফাইল এডিট: ${o.path}`:`ছবি বদল: ${o.path}`}
 function vBuild(){
   $('#main').innerHTML=`<div class="card"><b>পরিবর্তনের তালিকা (${ops.length})</b>${ops.map((o,i)=>`<div class="perm"><span style="flex:1;font-family:inherit">${esc(desc(o))}</span><button class="btn sec sm" onclick="delIdx(${i})">✕</button></div>`).join('')||'<p class="mut">এখনো কোনো পরিবর্তন নেই</p>'}</div>
   <div class="card"><label class="ck"><input type="checkbox" ${ks.use?'checked':''} onchange="ks.use=this.checked;vBuild()"> নিজের keystore (.p12 / .pfx) দিয়ে সাইন করব</label>

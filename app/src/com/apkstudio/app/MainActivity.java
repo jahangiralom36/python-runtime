@@ -146,6 +146,8 @@ public class MainActivity extends Activity {
             return s.toString();
         }
         if (m.equals("search")) return Engine.search(apk, a.getString("q")).toString();
+        if (m.equals("listFiles")) return Engine.listFiles(apk, a.optString("q", "")).toString();
+        if (m.equals("readFile")) return new JSONObject().put("text", Engine.readText(apk, a.getString("path"))).toString();
         if (m.equals("build")) return build(a);
         if (m.equals("save")) {
             Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
