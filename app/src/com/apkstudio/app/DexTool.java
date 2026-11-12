@@ -41,6 +41,39 @@ final class DexTool {
         return l;
     }
 
+    /** কোন স্ট্রিং (http সহ) কোন ক্লাসে ব্যবহার হয়েছে — "কোন পেজ/ক্লাসের লিংক" বোঝার জন্য। ব্যর্থ হলে ফাঁকা। */
+    static java.util.Map<String, List<String>> owners(byte[] dex) {
+        java.util.Map<String, List<String>> out = new java.util.HashMap<String, List<String>>();
+        try {
+            DexBackedDexFile file = new DexBackedDexFile(Opcodes.getDefault(), dex);
+            for (org.jf.dexlib2.iface.ClassDef c : file.getClasses()) {
+                String cn = c.getType();
+                cn = cn.length() > 2 ? cn.substring(1, cn.length() - 1).replace('/', '.') : cn;
+                for (org.jf.dexlib2.iface.Field f : c.getFields()) {
+                    EncodedValue v = f.getInitialValue();
+                    if (v != null && v.getValueType() == ValueType.STRING) put(out, ((StringEncodedValue) v).getValue(), cn);
+                }
+                for (org.jf.dexlib2.iface.Method m : c.getMethods()) {
+                    org.jf.dexlib2.iface.MethodImplementation impl = m.getImplementation();
+                    if (impl == null) continue;
+                    for (Instruction i : impl.getInstructions()) {
+                        String name = i.getOpcode().name;
+                        if (name.startsWith("const-string"))
+                            put(out, ((StringReference) ((org.jf.dexlib2.iface.instruction.ReferenceInstruction) i).getReference()).getString(), cn);
+                    }
+                }
+            }
+        } catch (Throwable t) { /* মালিক জানা না গেলেও স্ক্যান চলবে */ }
+        return out;
+    }
+
+    private static void put(java.util.Map<String, List<String>> m, String s, String cls) {
+        if (s.indexOf("http") < 0) return;
+        List<String> l = m.get(s);
+        if (l == null) { l = new ArrayList<String>(); m.put(s, l); }
+        if (l.size() < 5 && !l.contains(cls)) l.add(cls);
+    }
+
     static byte[] rewrite(byte[] dex, final List<Engine.StrOp> ops) throws java.io.IOException {
         DexBackedDexFile file = new DexBackedDexFile(Opcodes.getDefault(), dex);
         DexRewriter rw = new DexRewriter(new RewriterModule() {

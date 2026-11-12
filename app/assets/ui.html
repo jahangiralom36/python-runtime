@@ -43,6 +43,14 @@ input[type=color]{width:42px;height:38px;border:1px solid var(--line);border-rad
 .perm:last-child{border:0}
 .spin{display:inline-block;width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--pri);border-radius:50%;animation:s 1s linear infinite;vertical-align:-3px;margin-right:6px}
 @keyframes s{to{transform:rotate(360deg)}}
+.loc{display:flex;gap:8px;padding:7px 0;border-top:1px dashed var(--line);font-size:13px}
+.loc .ic{flex:0 0 auto;font-size:16px}.loc .tx{min-width:0;flex:1}
+.loc .sn{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--mut);word-break:break-all;margin-top:2px}
+.loc mark{background:rgba(240,140,0,.28);color:inherit;border-radius:3px}
+.eff{background:rgba(59,91,219,.09);border:1px solid rgba(59,91,219,.35);border-radius:10px;padding:8px 10px;font-size:13px;margin-top:8px}
+.warn{background:rgba(240,140,0,.12);border:1px solid rgba(240,140,0,.45);border-radius:10px;padding:8px 10px;font-size:13px;margin-top:8px}
+h3.sec{margin:16px 4px 8px;font-size:14px;color:var(--mut)}
+details summary{cursor:pointer;color:var(--pri);font-size:13px;margin-top:6px}
 </style>
 </head>
 <body>
@@ -93,20 +101,66 @@ function tab(t,keep){TAB=t;if(!S)return;const sc=keep?$('#main').scrollTop:0;
 /* URLs */
 const NOISE=['schemas.android.com','www.w3.org','xmlpull.org','apache.org','developer.android.com','docs.oracle.com','purl.org','ns.adobe.com','example.com','localhost'];
 let uq='',unoise=false;
+const KIND={code:['⚙️','অ্যাপের কোডে','অ্যাপ চালু হলে/কাজ করার সময় এই লিংকে ডাটা বা পেজ চাইবে'],
+ resource:['🔤','অ্যাপের সেটিংস/টেক্সটে (resources)','অ্যাপের ভেতরের সেটিং বা লেখায় এই লিংক ব্যবহার হয়'],
+ manifest:['📋','ম্যানিফেস্টে','অ্যাপের মূল তথ্যে (যেমন deep link) এই লিংক আছে'],
+ layout:['🧩','স্ক্রিন/লেআউট ফাইলে','কোনো স্ক্রিনের ডিজাইন ফাইলে এই লিংক আছে'],
+ page:['🌐','ওয়েব পেজ ফাইলে (WebView)','অ্যাপের ভেতরে দেখানো এই পেজের লিংক বদলাবে'],
+ config:['🗂️','কনফিগ ফাইলে','কনফিগ ফাইলের ভেতরের মান বদলাবে']};
+function urlType(u){const l=u.toLowerCase();
+  if(/firebaseio\.com|firebase|googleapis\.com\/(identitytoolkit|fcm)|firebasestorage|appspot\.com/.test(l))return['🔥','Firebase/গুগল সার্ভিস'];
+  if(/play\.google\.com|market:\/\/|facebook\.com|instagram\.com|youtube\.com|youtu\.be|t\.me|wa\.me|twitter\.com|x\.com|tiktok\.com/.test(l))return['🔗','স্টোর/সোশ্যাল লিংক'];
+  if(/privacy|terms|policy|tos|licen[cs]e/.test(l))return['📄','গোপনীয়তা/শর্তের পেজ'];
+  if(/\/api\b|\/api\/|api\.|\/v\d+\/|\.php|\.json|graphql|\/rest\/|login|auth|token/.test(l))return['🛰️','API / সার্ভার'];
+  if(/\.(png|jpe?g|gif|webp|svg|mp4|mp3|pdf)(\?|$)/.test(l))return['🖼️','ছবি/ফাইলের লিংক'];
+  return['🌐','ওয়েবসাইট/সার্ভার'];}
+const hl=(t,u)=>{const i=t.indexOf(u);return i<0?esc(t):esc(t.slice(0,i))+'<mark>'+esc(u)+'</mark>'+esc(t.slice(i+u.length))};
+const shortCls=c=>c.split('.').slice(-2).join('.');
+function locHtml(u,l,pkg){
+  const k=KIND[l.kind]||KIND.config;
+  let own='';
+  if(l.owners&&l.owners.length){
+    const pp=(pkg||'').split('.').slice(0,2).join('.');
+    const o=[...l.owners].sort((a,b)=>(pp&&b.startsWith(pp))-(pp&&a.startsWith(pp)));
+    own=l.kind==='code'?`<div>ক্লাস: <b>${esc(o.slice(0,2).map(shortCls).join(', '))}</b></div>`:`<div>নাম: <b>${esc(o.slice(0,2).join(', '))}</b></div>`}
+  const open=(l.kind==='page'||l.kind==='config')?` <a href="#" onclick="openIn('${esc(l.file).replace(/'/g,"\\'")}');return false" style="color:var(--pri)">ফাইল খুলুন ›</a>`:'';
+  return `<div class="loc"><div class="ic">${k[0]}</div><div class="tx"><div><b>${k[1]}</b> <span class="mut">· ${esc(l.file)}${l.n>1?' · '+l.n+'×':''}</span>${open}</div>${own}
+   <div class="sn">${hl(l.snip||'',u)}</div></div></div>`}
+function impact(old,nw){ // বদলালে কোন কোন লিংক/ফাইলে কী হবে
+  const hit=S.urls.filter(x=>x.url.includes(old)),files=new Set();let n=0;
+  hit.forEach(x=>{n+=x.count;(x.locs||[]).forEach(l=>files.add(l.file))});
+  return{hit,files:[...files],n}}
+function effHtml(u,e){
+  const im=impact(u,e),others=im.hit.filter(x=>x.url!==u);
+  let h=`<div class="eff">📍 <b>${im.n} জায়গায়</b>, ${im.files.length} টি ফাইলে এই লিংক বদলাবে:<br><span class="u">${im.files.slice(0,6).map(esc).join('<br>')}${im.files.length>6?'<br>…আরও '+(im.files.length-6)+' টি':''}</span></div>`;
+  if(others.length)h+=`<div class="warn">⚠ এই লিংকটি আরও ${others.length} টি লম্বা লিংকের শুরুতে আছে, সেগুলোও বদলে যাবে:<br><span class="u">${others.slice(0,3).map(x=>esc(x.url)+' → '+esc(x.url.split(u).join(e))).join('<br>')}${others.length>3?'<br>…':''}</span></div>`;
+  return h}
 function vUrls(){
-  const all=S.urls.map(u=>({...u,noise:NOISE.some(n=>u.url.includes(n))}));
+  const all=S.urls.map(u=>({...u,noise:NOISE.some(n=>u.url.includes(n)),type:urlType(u.url)}));
   const l=all.filter(u=>(unoise||!u.noise)&&(effUrl(u.url)+u.url).toLowerCase().includes(uq.toLowerCase()));
-  $('#main').innerHTML=`<div class="card"><b>পুরো ডোমেইন একসাথে বদলান</b><div class="mut">যেমন https://old.com → https://new.com (কোড, রিসোর্স, ম্যানিফেস্ট, assets সব জায়গায়)</div>
-  <div class="row"><input type="text" id="bo" placeholder="পুরনো, যেমন https://old.com"></div><div class="row"><input type="text" id="bn" placeholder="নতুন, যেমন https://new.com"><button class="btn" onclick="bulk()">বদলান</button></div></div>
+  const groups={};l.forEach(u=>(groups[u.type[1]]=groups[u.type[1]]||[]).push(u));
+  const order=Object.keys(groups).sort((a,b)=>(a==='ওয়েবসাইট/সার্ভার')-(b==='ওয়েবসাইট/সার্ভার'));
+  window._ul=[];let idx=0,shown=0;
+  const cards=order.map(g=>{const items=groups[g].map(u=>{
+    if(shown>=300)return'';shown++;const i=idx++;window._ul.push(u);
+    const e=effUrl(u.url),ch=e!==u.url,op=getOp('str',u.url),k=u.type;
+    return `<div class="card"><div><span class="b">${k[0]} ${k[1]}</span>${ch?'<span class="b ok">✓ পরিবর্তিত</span>':''}<span class="b">${u.count}× মোট</span></div>
+     <div class="u" style="margin-top:4px">${esc(u.url)}</div>
+     ${(u.locs||[]).map(x=>locHtml(u.url,x,S.package)).join('')||u.where.map(w=>`<span class="b">${esc(w)}</span>`).join('')}
+     <div class="row"><input type="text" id="u${i}" value="${esc(e)}" placeholder="নতুন লিংক" oninput="prevUrl(${i})"><button class="btn sm" onclick="saveUrl(${i})">সেভ</button></div>
+     <div id="p${i}">${ch?effHtml(u.url,e):`<div class="mut" style="margin-top:6px">নতুন লিংক লিখলে নিচে দেখাবে কোথায় কী বদলাবে।</div>`}</div>
+     ${op?`<div class="row"><button class="btn sec sm" onclick="delIdx(${ops.indexOf(op)})">↺ ফিরিয়ে নিন</button></div>`:''}</div>`}).join('');
+    return items?`<h3 class="sec">${groups[g][0].type[0]} ${g} (${groups[g].length})</h3>`+items:''}).join('');
+  $('#main').innerHTML=`<div class="note">💡 <b>কীভাবে বুঝবেন:</b> প্রতিটি কার্ডে লিংকের নিচে দেখানো আছে সেটা <b>কোন ফাইল/ক্লাস/পেজে</b> আছে ও আশেপাশের লেখা (হলুদ = লিংকটি)। নতুন লিংক লিখলে সাথে সাথে দেখাবে <b>কোথায় কী বদলাবে</b>। তারপর <b>সেভ</b> → <b>📦 বিল্ড</b>।</div>
+  <div class="card"><b>পুরো ডোমেইন একসাথে বদলান</b><div class="mut">যেমন https://old.com → https://new.com (কোড, রিসোর্স, ম্যানিফেস্ট, assets সব জায়গায়)</div>
+  <div class="row"><input type="text" id="bo" placeholder="পুরনো, যেমন https://old.com" oninput="prevBulk()"></div><div class="row"><input type="text" id="bn" placeholder="নতুন, যেমন https://new.com" oninput="prevBulk()"><button class="btn" onclick="bulk()">বদলান</button></div><div id="bp"></div></div>
   <div class="card"><input type="text" id="uq" placeholder="🔎 ফিল্টার..." value="${esc(uq)}" oninput="uq=this.value;clearTimeout(window._t);window._t=setTimeout(()=>{vUrls();const i=$('#uq');i.focus();i.setSelectionRange(99,99)},300)">
-  <label class="ck" style="margin-top:8px"><input type="checkbox" ${unoise?'checked':''} onchange="unoise=this.checked;vUrls()"> সিস্টেম/লাইব্রেরির লিংকও দেখান</label><div class="mut" style="margin-top:4px">${l.length} টি লিংক</div></div>`+
-  l.slice(0,300).map((u,i)=>{const e=effUrl(u.url),ch=e!==u.url,op=getOp('str',u.url);
-   return `<div class="card"><div class="u">${esc(u.url)}</div><div>${u.where.map(w=>`<span class="b">${esc(w)}</span>`).join('')}<span class="b">${u.count}×</span>${ch?'<span class="b ok">✓ পরিবর্তিত</span>':''}</div>
-   <div class="row"><input type="text" id="u${i}" value="${esc(e)}"><button class="btn sm" onclick="saveUrl(${i})">সেভ</button></div>
-   ${op?`<div class="row"><button class="btn sec sm" onclick="delIdx(${ops.indexOf(op)})">↺ ফিরিয়ে নিন</button></div>`:''}</div>`}).join('')+(l.length>300?'<p class="mut">আরও আছে — ফিল্টার ব্যবহার করুন</p>':'');
-  window._ul=l}
+  <label class="ck" style="margin-top:8px"><input type="checkbox" ${unoise?'checked':''} onchange="unoise=this.checked;vUrls()"> সিস্টেম/লাইব্রেরির লিংকও দেখান</label><div class="mut" style="margin-top:4px">${l.length} টি লিংক</div></div>`+cards+(l.length>300?'<p class="mut">আরও আছে — ফিল্টার ব্যবহার করুন</p>':'')}
+function prevUrl(i){const u=window._ul[i],v=$('#u'+i).value.trim();$('#p'+i).innerHTML=(v&&v!==u.url)?effHtml(u.url,v):'<div class="mut" style="margin-top:6px">কিছু বদলায়নি</div>'}
+function prevBulk(){const o=$('#bo').value.trim(),n=$('#bn').value.trim();$('#bp').innerHTML=o&&n&&o!==n?(S.urls.some(x=>x.url.includes(o))?effHtml(o,n):'<div class="warn">এই লেখা কোনো লিংকে পাওয়া যায়নি (তবে কোডের অন্য টেক্সটে থাকলে তা-ও বদলাবে)।</div>'):''}
 function saveUrl(i){const u=window._ul[i],v=$('#u'+i).value.trim();if(!v||v===effUrl(u.url))return toast('কিছু বদলায়নি');setOp({t:'str',old:u.url,new:v,exact:false});toast('✅ যোগ হয়েছে — বিল্ড ট্যাবে গিয়ে তৈরি করুন')}
 function bulk(){const o=$('#bo').value.trim(),n=$('#bn').value.trim();if(!o||!n)return toast('দুটো ঘরই পূরণ করুন');setOp({t:'str',old:o,new:n,exact:false});toast('✅ যোগ হয়েছে')}
+function openIn(path){fq=path;window._auto=path;tab('files')}
 
 /* Texts */
 let tq='';
@@ -170,6 +224,7 @@ async function vFiles(){
   <div id="flist"></div><div id="fed"></div>`;
   try{const r=await nat('listFiles',{q:fq});window._fl=r.files;
     $('#fcount').textContent=r.files.length+' টি ফাইল';
+    if(window._auto){const j=r.files.findIndex(f=>f.path===window._auto);window._auto=null;if(j>=0)setTimeout(()=>openFile(j),0)}
     $('#flist').innerHTML=r.files.map((x,i)=>{const op=ops.find(o=>o.t==='textfile'&&o.path===x.path);
       return `<div class="card" style="padding:9px 12px;display:flex;align-items:center;gap:8px"><div class="u" style="flex:1;cursor:pointer" onclick="openFile(${i})">${esc(x.path)}</div>${op?'<span class="b ok">✓ পরিবর্তিত</span>':''}</div>`}).join('')||'<div class="card mut">কোনো টেক্সট/কনফিগ ফাইল পাওয়া যায়নি</div>';
   }catch(e){fail(e)}
@@ -195,7 +250,7 @@ function saveFileEdit(){
 
 /* Build */
 let ks={use:false,name:'',alias:'',pass:'',keyPass:''};
-function desc(o){return o.t==='str'?`টেক্সট/লিংক: ${o.old.slice(0,40)} → ${o.new.slice(0,40)}`:o.t==='resstr'?`রিসোর্স টেক্সট #${o.pos}: ${o.value.slice(0,40)}`:o.t==='rescolor'?`রং #${o.pos}: ${o.value}`:o.t==='delperm'?`পারমিশন সরানো: ${o.name.split('.').pop()}`:o.t==='delfile'?`ফাইল মোছা: ${o.path}`:o.t==='textfile'?`কনফিগ ফাইল এডিট: ${o.path}`:`ছবি বদল: ${o.path}`}
+function desc(o){return o.t==='str'?`টেক্সট/লিংক: ${o.old.slice(0,40)} → ${o.new.slice(0,40)}`+(()=>{const im=impact(o.old,o.new);return im.n?` (${im.n} জায়গায়, ${im.files.length} ফাইলে)`:' (অন্যান্য টেক্সটে খুঁজে বদলাবে)'})():o.t==='resstr'?`রিসোর্স টেক্সট #${o.pos}: ${o.value.slice(0,40)}`:o.t==='rescolor'?`রং #${o.pos}: ${o.value}`:o.t==='delperm'?`পারমিশন সরানো: ${o.name.split('.').pop()}`:o.t==='delfile'?`ফাইল মোছা: ${o.path}`:o.t==='textfile'?`কনফিগ ফাইল এডিট: ${o.path}`:`ছবি বদল: ${o.path}`}
 function vBuild(){
   $('#main').innerHTML=`<div class="card"><b>পরিবর্তনের তালিকা (${ops.length})</b>${ops.map((o,i)=>`<div class="perm"><span style="flex:1;font-family:inherit">${esc(desc(o))}</span><button class="btn sec sm" onclick="delIdx(${i})">✕</button></div>`).join('')||'<p class="mut">এখনো কোনো পরিবর্তন নেই</p>'}</div>
   <div class="card"><label class="ck"><input type="checkbox" ${ks.use?'checked':''} onchange="ks.use=this.checked;vBuild()"> নিজের keystore (.p12 / .pfx) দিয়ে সাইন করব</label>

@@ -57,25 +57,56 @@ final class Engine {
         return true;
     }
 
-    static void collectUrls(String s, String where, Map<String, int[]> counts, Map<String, Set<String>> wheres) {
+    /** একটা লিংক কোথায় কোথায় আছে — ফাইল, ধরন, মালিক (ক্লাস/রিসোর্স নাম) ও আশেপাশের লেখা। */
+    static final class UrlInfo {
+        int count;
+        final LinkedHashMap<String, JSONObject> locs = new LinkedHashMap<String, JSONObject>();
+    }
+
+    static String snippet(String s, int at, int len) {
+        int a = s.lastIndexOf('\n', at) + 1, b = s.indexOf('\n', at);
+        if (b < 0) b = s.length();
+        String line = s.substring(a, b);
+        int rel = at - a;
+        if (line.length() > 150) {
+            int from = Math.max(0, Math.min(rel - 50, line.length() - 150));
+            line = (from > 0 ? "…" : "") + line.substring(from, from + 150) + (from + 150 < line.length() ? "…" : "");
+        }
+        return line.trim();
+    }
+
+    static void collectUrls(String s, String where, String kind, List<String> owners, Map<String, UrlInfo> map) {
         if (s.indexOf("http") < 0) return;
         Matcher m = URL_RE.matcher(s);
         while (m.find()) {
             String u = m.group();
             while (u.length() > 0 && ".,;:'".indexOf(u.charAt(u.length() - 1)) >= 0) u = u.substring(0, u.length() - 1);
             if (u.length() < 11) continue;
-            int[] c = counts.get(u);
-            if (c == null) { c = new int[1]; counts.put(u, c); wheres.put(u, new LinkedHashSet<String>()); }
-            c[0]++;
-            if (wheres.get(u).size() < 6) wheres.get(u).add(where);
+            UrlInfo info = map.get(u);
+            if (info == null) { info = new UrlInfo(); map.put(u, info); }
+            info.count++;
+            String key = where + "|" + (owners == null || owners.isEmpty() ? "" : owners.get(0));
+            JSONObject loc = info.locs.get(key);
+            try {
+                if (loc == null && info.locs.size() < 8) {
+                    loc = new JSONObject().put("file", where).put("kind", kind).put("n", 0).put("snip", snippet(s, m.start(), u.length()));
+                    if (owners != null && !owners.isEmpty()) loc.put("owners", new JSONArray(owners));
+                    info.locs.put(key, loc);
+                }
+                if (loc != null) loc.put("n", loc.getInt("n") + 1);
+            } catch (Exception ignore) { }
         }
+    }
+
+    static boolean contains(JSONArray a, String v) {
+        for (int i = 0; i < a.length(); i++) if (v.equals(a.optString(i))) return true;
+        return false;
     }
 
     static JSONObject scan(File apk) throws Exception {
         ZipFile z = new ZipFile(apk);
         try {
-            Map<String, int[]> counts = new LinkedHashMap<String, int[]>();
-            Map<String, Set<String>> wheres = new HashMap<String, Set<String>>();
+            Map<String, UrlInfo> umap = new LinkedHashMap<String, UrlInfo>();
             JSONObject out = new JSONObject();
             JSONArray strings = new JSONArray(), colors = new JSONArray(), images = new JSONArray(), perms = new JSONArray();
             ArscDoc arsc = null;
@@ -95,14 +126,25 @@ final class Engine {
                 if (e.isDirectory()) continue;
                 if (isDex(n)) {
                     dexCount++;
-                    for (String s : DexTool.strings(read(z, e))) collectUrls(s, n, counts, wheres);
+                    byte[] dx = read(z, e);
+                    List<String> ds = DexTool.strings(dx);
+                    boolean any = false;
+                    for (String s : ds) if (s.indexOf("http") >= 0) { any = true; break; }
+                    Map<String, List<String>> own = any ? DexTool.owners(dx) : new HashMap<String, List<String>>();
+                    for (String s : ds) collectUrls(s, n, "code", own.get(s), umap);
                 } else if (n.equals("resources.arsc")) {
-                    for (String s : arsc.pool.strings) collectUrls(s, n, counts, wheres);
+                    Map<String, List<String>> rn = new HashMap<String, List<String>>();
+                    for (ArscDoc.Entry re : arsc.entries) if (re.value != null && re.value.indexOf("http") >= 0) {
+                        List<String> l = rn.get(re.value);
+                        if (l == null) { l = new ArrayList<String>(); rn.put(re.value, l); }
+                        if (l.size() < 4) l.add("@" + re.type + "/" + re.name);
+                    }
+                    for (String s : arsc.pool.strings) collectUrls(s, n, "resource", rn.get(s), umap);
                 } else if (n.endsWith(".xml") && (n.startsWith("res/") || n.equals("AndroidManifest.xml")) && e.getSize() < MAX_TEXT) {
                     byte[] b = read(z, e);
                     if (!BinXml.isBinXml(b)) continue;
                     BinXml x = new BinXml(b);
-                    for (String s : x.pool.strings) collectUrls(s, n, counts, wheres);
+                    for (String s : x.pool.strings) collectUrls(s, n, n.equals("AndroidManifest.xml") ? "manifest" : "layout", null, umap);
                     if (n.equals("AndroidManifest.xml")) {
                         final String[] info = new String[3];
                         final List<String> pl = new ArrayList<String>();
@@ -132,7 +174,7 @@ final class Engine {
                     }
                 } else if (isTextAsset(e)) {
                     byte[] b = read(z, e);
-                    if (looksText(b)) collectUrls(new String(b, ResPool.U8), n, counts, wheres);
+                    if (looksText(b)) collectUrls(new String(b, ResPool.U8), n, ext(n).equals("html") || ext(n).equals("htm") || ext(n).equals("js") || ext(n).equals("css") ? "page" : "config", null, umap);
                 }
                 if ((n.startsWith("res/") || n.startsWith("assets/")) && IMG_EXT.contains(ext(n))) {
                     images.put(new JSONObject().put("path", n).put("size", e.getSize()));
@@ -148,8 +190,10 @@ final class Engine {
                 }
             }
             JSONArray urls = new JSONArray();
-            for (Map.Entry<String, int[]> e : counts.entrySet()) {
-                urls.put(new JSONObject().put("url", e.getKey()).put("count", e.getValue()[0]).put("where", new JSONArray(wheres.get(e.getKey()))));
+            for (Map.Entry<String, UrlInfo> e : umap.entrySet()) {
+                JSONArray locs = new JSONArray(), where = new JSONArray();
+                for (JSONObject l : e.getValue().locs.values()) { locs.put(l); if (!contains(where, l.getString("file"))) where.put(l.getString("file")); }
+                urls.put(new JSONObject().put("url", e.getKey()).put("count", e.getValue().count).put("where", where).put("locs", locs));
             }
             out.put("urls", urls).put("strings", strings).put("colors", colors).put("images", images).put("perms", perms)
                     .put("label", label).put("package", pkg).put("versionName", ver).put("minSdk", minSdk)
