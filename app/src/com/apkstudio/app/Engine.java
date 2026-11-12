@@ -130,7 +130,7 @@ final class Engine {
                     List<String> ds = DexTool.strings(dx);
                     boolean any = false;
                     for (String s : ds) if (s.indexOf("http") >= 0) { any = true; break; }
-                    Map<String, List<String>> own = any ? DexTool.owners(dx) : new HashMap<String, List<String>>();
+                    Map<String, List<String>> own = any ? DexTool.owners(dx, "http") : new HashMap<String, List<String>>();
                     for (String s : ds) collectUrls(s, n, "code", own.get(s), umap);
                 } else if (n.equals("resources.arsc")) {
                     Map<String, List<String>> rn = new HashMap<String, List<String>>();
@@ -228,7 +228,17 @@ final class Engine {
                 int hits = 0;
                 String first = null;
                 for (String s : src) if (s.contains(q)) { hits++; if (first == null) first = s.length() > 160 ? s.substring(0, 160) + "…" : s; }
-                if (hits > 0) res.put(new JSONObject().put("where", n).put("count", hits).put("sample", first));
+                if (hits > 0) {
+                    JSONObject ro = new JSONObject().put("where", n).put("count", hits).put("sample", first);
+                    if (isDex(n)) {
+                        JSONArray ms = new JSONArray();
+                        Set<String> seen = new LinkedHashSet<String>();
+                        for (List<String> l : DexTool.owners(read(z, e), q).values()) seen.addAll(l);
+                        for (String o : seen) { if (ms.length() >= 8) break; ms.put(o); }
+                        ro.put("owners", ms);
+                    }
+                    res.put(ro);
+                }
             }
         } finally { z.close(); }
         return new JSONObject().put("results", res);

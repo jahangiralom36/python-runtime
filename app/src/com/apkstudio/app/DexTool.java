@@ -41,8 +41,8 @@ final class DexTool {
         return l;
     }
 
-    /** কোন স্ট্রিং (http সহ) কোন ক্লাসে ব্যবহার হয়েছে — "কোন পেজ/ক্লাসের লিংক" বোঝার জন্য। ব্যর্থ হলে ফাঁকা। */
-    static java.util.Map<String, List<String>> owners(byte[] dex) {
+    /** কোন স্ট্রিং (needle সহ) কোন ক্লাস/মেথডে ব্যবহার হয়েছে। মান: "ক্লাস#মেথড|কল১,কল২" বা "ক্লাস#ফিল্ড:নাম"। ব্যর্থ হলে ফাঁকা। */
+    static java.util.Map<String, List<String>> owners(byte[] dex, String needle) {
         java.util.Map<String, List<String>> out = new java.util.HashMap<String, List<String>>();
         try {
             DexBackedDexFile file = new DexBackedDexFile(Opcodes.getDefault(), dex);
@@ -51,27 +51,41 @@ final class DexTool {
                 cn = cn.length() > 2 ? cn.substring(1, cn.length() - 1).replace('/', '.') : cn;
                 for (org.jf.dexlib2.iface.Field f : c.getFields()) {
                     EncodedValue v = f.getInitialValue();
-                    if (v != null && v.getValueType() == ValueType.STRING) put(out, ((StringEncodedValue) v).getValue(), cn);
+                    if (v != null && v.getValueType() == ValueType.STRING) put(out, ((StringEncodedValue) v).getValue(), needle, cn + "#ফিল্ড:" + f.getName());
                 }
                 for (org.jf.dexlib2.iface.Method m : c.getMethods()) {
                     org.jf.dexlib2.iface.MethodImplementation impl = m.getImplementation();
                     if (impl == null) continue;
+                    List<String> hits = new ArrayList<String>(), calls = new ArrayList<String>();
                     for (Instruction i : impl.getInstructions()) {
-                        String name = i.getOpcode().name;
-                        if (name.startsWith("const-string"))
-                            put(out, ((StringReference) ((org.jf.dexlib2.iface.instruction.ReferenceInstruction) i).getReference()).getString(), cn);
+                        if (!(i instanceof org.jf.dexlib2.iface.instruction.ReferenceInstruction)) continue;
+                        org.jf.dexlib2.iface.reference.Reference r = ((org.jf.dexlib2.iface.instruction.ReferenceInstruction) i).getReference();
+                        if (r instanceof StringReference) {
+                            String sv = ((StringReference) r).getString();
+                            if (sv.contains(needle)) hits.add(sv);
+                        } else if (r instanceof org.jf.dexlib2.iface.reference.MethodReference && calls.size() < 4) {
+                            org.jf.dexlib2.iface.reference.MethodReference mr = (org.jf.dexlib2.iface.reference.MethodReference) r;
+                            String dc = mr.getDefiningClass();
+                            dc = dc.substring(dc.lastIndexOf('/') + 1, dc.length() - 1);
+                            String call = dc + "." + mr.getName();
+                            if (!dc.equals("Object") && !dc.startsWith("StringBuilder") && !mr.getName().equals("<init>") && !calls.contains(call)) calls.add(call);
+                        }
                     }
+                    if (hits.isEmpty()) continue;
+                    StringBuilder sb = new StringBuilder(cn).append('#').append(m.getName()).append('|');
+                    for (int k = 0; k < calls.size(); k++) sb.append(k > 0 ? "," : "").append(calls.get(k));
+                    for (String sv : hits) put(out, sv, needle, sb.toString());
                 }
             }
         } catch (Throwable t) { /* মালিক জানা না গেলেও স্ক্যান চলবে */ }
         return out;
     }
 
-    private static void put(java.util.Map<String, List<String>> m, String s, String cls) {
-        if (s.indexOf("http") < 0) return;
+    private static void put(java.util.Map<String, List<String>> m, String s, String needle, String owner) {
+        if (s.indexOf(needle) < 0) return;
         List<String> l = m.get(s);
         if (l == null) { l = new ArrayList<String>(); m.put(s, l); }
-        if (l.size() < 5 && !l.contains(cls)) l.add(cls);
+        if (l.size() < 6 && !l.contains(owner)) l.add(owner);
     }
 
     static byte[] rewrite(byte[] dex, final List<Engine.StrOp> ops) throws java.io.IOException {

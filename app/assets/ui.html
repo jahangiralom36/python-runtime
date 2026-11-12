@@ -100,7 +100,10 @@ function tab(t,keep){TAB=t;if(!S)return;const sc=keep?$('#main').scrollTop:0;
 
 /* Pages */
 let pg=null;
-const topCls=c=>c.split('$')[0];
+const topCls=c=>c.split('#')[0].split('$')[0];
+function ownHtml(o){const [h,calls]=o.split('|');const [c,m]=h.split('#');const sc=c.split('.').slice(-2).join('.');
+  const what=!m?'':m.startsWith('ফিল্ড:')?`ধ্রুবক (field) <b>${esc(m.slice(6))}</b>`:`মেথড <b>${esc(m)}()</b>`;
+  return `<div>ক্লাস <b>${esc(sc)}</b>${what?' → '+what:''}</div>`+(calls?`<div class="mut">এই মেথড ডাকে: ${esc(calls.split(',').join(', '))}</div>`:'')}
 function buildPages(){
   const acts=(S.activities||[]),P=new Map();
   const get=(key,ic,name,sub,kind,file)=>{if(!P.has(key))P.set(key,{key,ic,name,sub,kind,file,urls:new Map()});return P.get(key)};
@@ -142,7 +145,7 @@ function vPage(i){
   (list.length?list.map((u,j)=>{const e=effUrl(u.url),ch=e!==u.url,op=getOp('str',u.url),k=urlType(u.url),mine=(u.locs||[]).filter(l=>l.kind==='code'?(l.owners||[]).some(c=>p.kind==='act'?topCls(c)===p.sub:p.kind==='cls'?topCls(c)===p.sub.split(' ')[0]:true):l.file===p.file||p.kind==='res');
     const fo=p.kind==='file'&&p.file!=='AndroidManifest.xml';
     return `<div class="card"><div><span class="b">${k[0]} ${k[1]}</span>${ch?'<span class="b ok">✓ পরিবর্তিত</span>':''}</div><div class="u" style="margin-top:4px">${esc(u.url)}</div>
-    ${(mine.length?mine:u.locs||[]).slice(0,3).map(x=>locHtml(u.url,x,S.package)).join('')}
+    ${(mine.length?mine:u.locs||[]).slice(0,3).map(x=>locHtml(u.url,{...x,owners:(x.owners||[]).filter(c=>p.kind==='act'?topCls(c)===p.sub:p.kind==='cls'?topCls(c)===p.sub.split(' ')[0]:true)},S.package)).join('')}
     <div class="row"><input type="text" id="u${j}" value="${esc(e)}" placeholder="নতুন লিংক" oninput="prevUrl(${j})"></div>
     <div class="row">${fo?`<button class="btn sm" onclick="saveHere(${j},${i})">শুধু এই পেজে</button>`:''}<button class="btn ${fo?'sec ':''}sm" onclick="saveUrl(${j})">সব জায়গায়</button>${op?`<button class="btn sec sm" onclick="delIdx(${ops.indexOf(op)})">↺</button>`:''}</div>
     <div id="p${j}">${ch?effHtml(u.url,e):'<div class="mut" style="margin-top:6px">নতুন লিংক লিখলে নিচে দেখাবে কোথায় কী বদলাবে।</div>'}</div></div>`}).join(''):'<div class="card mut">এই পেজে কোনো লিংক পাওয়া যায়নি।</div>')}
@@ -179,7 +182,7 @@ function locHtml(u,l,pkg){
   if(l.owners&&l.owners.length){
     const pp=(pkg||'').split('.').slice(0,2).join('.');
     const o=[...l.owners].sort((a,b)=>(pp&&b.startsWith(pp))-(pp&&a.startsWith(pp)));
-    own=l.kind==='code'?`<div>ক্লাস: <b>${esc(o.slice(0,2).map(shortCls).join(', '))}</b></div>`:`<div>নাম: <b>${esc(o.slice(0,2).join(', '))}</b></div>`}
+    own=l.kind==='code'?o.slice(0,3).map(ownHtml).join(''):`<div>নাম: <b>${esc(o.slice(0,2).join(', '))}</b></div>`}
   const open=(l.kind==='page'||l.kind==='config')?` <a href="#" onclick="openIn('${esc(l.file).replace(/'/g,"\\'")}');return false" style="color:var(--pri)">ফাইল খুলুন ›</a>`:'';
   return `<div class="loc"><div class="ic">${k[0]}</div><div class="tx"><div><b>${k[1]}</b> <span class="mut">· ${esc(l.file)}${l.n>1?' · '+l.n+'×':''}</span>${open}</div>${own}
    <div class="sn">${hl(l.snip||'',u)}</div></div></div>`}
@@ -270,7 +273,7 @@ async function vFind(){
   <div class="row"><input type="text" id="fq" placeholder="যা খুঁজবেন"><button class="btn" onclick="doFind()">খুঁজুন</button></div>
   <div class="row"><input type="text" id="fr" placeholder="যা দিয়ে বদলাবেন"><button class="btn" onclick="addRepl()">বদলান</button></div></div><div id="fres"></div>`}
 async function doFind(){const q=$('#fq').value;if(!q)return;$('#fres').innerHTML='<div class="card"><span class="spin"></span>খোঁজা হচ্ছে...</div>';
-  try{const r=await nat('search',{q});$('#fres').innerHTML=`<div class="mut" style="margin:4px 4px 8px">${r.results.length} টি ফাইলে পাওয়া গেছে</div>`+r.results.map(x=>`<div class="card"><span class="u"><b>${esc(x.where)}</b></span> <span class="b">${x.count}×</span><div class="u mut">${esc(x.sample)}</div></div>`).join('')}catch(e){fail(e)}}
+  try{const r=await nat('search',{q});$('#fres').innerHTML=`<div class="mut" style="margin:4px 4px 8px">${r.results.length} টি ফাইলে পাওয়া গেছে</div>`+r.results.map(x=>`<div class="card"><span class="u"><b>${esc(x.where)}</b></span> <span class="b">${x.count}×</span><div class="u mut">${esc(x.sample)}</div>${x.owners&&x.owners.length?'<div class="loc"><div class="ic">⚙️</div><div class="tx"><b>কোন মেথডে ব্যবহার হয়েছে:</b>'+x.owners.map(ownHtml).join('')+'</div></div>':''}</div>`).join('')}catch(e){fail(e)}}
 function addRepl(){const q=$('#fq').value,r=$('#fr').value;if(!q)return toast('খুঁজুন ঘর খালি');setOp({t:'str',old:q,new:r,exact:false});toast('✅ যোগ হয়েছে ('+q.slice(0,20)+' → '+r.slice(0,20)+')')}
 
 /* Files (raw config editor) */
