@@ -68,7 +68,7 @@ const cbs={};let cbn=0;
 function nat(method,args){return new Promise((res,rej)=>{const id=++cbn;cbs[id]={res,rej};Android.call(method,JSON.stringify(args||{}),String(id))})}
 window.__cb=(id,ok,payload)=>{const c=cbs[id];if(!c)return;delete cbs[id];if(ok){try{c.res(JSON.parse(payload))}catch(e){c.res(payload)}}else c.rej(new Error(payload))};
 window.__prog=m=>{const l=$('#log');if(l){l.textContent+=m+'\n';l.scrollTop=l.scrollHeight}};
-window.__back=()=>{if(S&&TAB!=='urls'){tab('urls');return true}return false};
+window.__back=()=>{if(S&&TAB==='pages'&&pg){pg=null;tab('pages');return true}if(S&&TAB!=='pages'){tab('pages');return true}return false};
 
 /* ---------- ops ---------- */
 const keyOf=o=>o.t+':'+(o.t==='str'?o.old+'|'+!!o.exact:o.t==='delperm'?o.name:o.t==='delfile'||o.t==='repfile'?o.path:o.pos);
@@ -90,13 +90,70 @@ function home(){S=null;ops=[];built=null;$('#tabs').style.display='none';$('#nm'
 async function pick(){
   try{const r=await nat('pickApk');if(r.cancelled)return;
   $('#main').innerHTML=`<div class="card"><span class="spin"></span>${esc(r.name)} স্ক্যান হচ্ছে... (বড় অ্যাপে কিছুক্ষণ লাগে)</div>`;
-  S=await nat('scan');S.name=r.name;ops=[];built=null;$('#nm').textContent=r.name;$('#tabs').style.display='flex';TAB='urls';tab('urls')}catch(e){fail(e);home()}}
+  S=await nat('scan');S.name=r.name;ops=[];built=null;$('#nm').textContent=r.name;$('#tabs').style.display='flex';TAB='pages';pg=null;tab('pages')}catch(e){fail(e);home()}}
 
 /* ---------- tabs ---------- */
-const TABS=[['urls','🔗 লিংক'],['text','✏️ টেক্সট'],['color','🎨 রং'],['img','🖼️ ছবি'],['perm','🔐 পারমিশন'],['find','🔎 খুঁজুন'],['files','📁 ফাইল'],['build','📦 বিল্ড']];
+const TABS=[['pages','📄 পেজ'],['urls','🔗 লিংক'],['text','✏️ টেক্সট'],['color','🎨 রং'],['img','🖼️ ছবি'],['perm','🔐 পারমিশন'],['find','🔎 খুঁজুন'],['files','📁 ফাইল'],['build','📦 বিল্ড']];
 function tab(t,keep){TAB=t;if(!S)return;const sc=keep?$('#main').scrollTop:0;
   $('#tabs').innerHTML=TABS.map(([k,l])=>`<button class="${k===t?'on':''}" onclick="tab('${k}')">${l}</button>`).join('')+`<button onclick="if(confirm('নতুন APK বাছতে চান? অসেভ পরিবর্তন হারাবে।'))home()">↩ নতুন APK</button>`;
-  ({urls:vUrls,text:vText,color:vColor,img:vImg,perm:vPerm,find:vFind,files:vFiles,build:vBuild})[t]();$('#main').scrollTop=sc}
+  ({pages:vPages,urls:vUrls,text:vText,color:vColor,img:vImg,perm:vPerm,find:vFind,files:vFiles,build:vBuild})[t]();$('#main').scrollTop=sc}
+
+/* Pages */
+let pg=null;
+const topCls=c=>c.split('$')[0];
+function buildPages(){
+  const acts=(S.activities||[]),P=new Map();
+  const get=(key,ic,name,sub,kind,file)=>{if(!P.has(key))P.set(key,{key,ic,name,sub,kind,file,urls:new Map()});return P.get(key)};
+  acts.forEach(a=>get('A:'+a,'📱',a.split('.').pop(),a,'act'));
+  const actOf=c=>{const t=topCls(c);return acts.find(a=>a===t)};
+  S.urls.forEach(u=>{if(NOISE.some(n=>u.url.includes(n))&&!unoise)return;
+    (u.locs||[]).forEach(l=>{let p;
+      if(l.kind==='code'){const cs=(l.owners&&l.owners.length)?l.owners:['(অজানা ক্লাস)'];
+        cs.forEach(c=>{const a=actOf(c);p=a?get('A:'+a):get('C:'+topCls(c),'⚙️',topCls(c).split('.').pop(),topCls(c)+' (সার্ভিস/হেল্পার ক্লাস)','cls');add(p,u,l)});return}
+      if(l.kind==='page')p=get('F:'+l.file,'🌐',l.file.split('/').pop(),l.file+' (ওয়েব পেজ)','file',l.file);
+      else if(l.kind==='config')p=get('F:'+l.file,'🗂️',l.file.split('/').pop(),l.file+' (কনফিগ ফাইল)','file',l.file);
+      else if(l.kind==='layout')p=get('F:'+l.file,'🧩',l.file.split('/').pop(),l.file+' (স্ক্রিন ডিজাইন)','file',l.file);
+      else if(l.kind==='manifest')p=get('M','📋','ম্যানিফেস্ট','AndroidManifest.xml','file','AndroidManifest.xml');
+      else p=get('R','🔤','অ্যাপের টেক্সট/সেটিংস','resources (strings) — কোন পেজে ব্যবহার হয় কোড থেকে জানা যায় না','res');
+      add(p,u,l)})});
+  function add(p,u,l){if(!p.urls.has(u.url))p.urls.set(u.url,u)}
+  P.forEach(p=>{if(p.kind!=='file')return;const o=ops.find(o=>o.t==='textfile'&&o.path===p.file);if(!o)return;
+    p.urls=new Map();(o.content.match(/https?:\/\/[^\s"'<>\\)}\]`]+/g)||[]).forEach(m=>{m=m.replace(/[.,;:']+$/,'');if(m.length<11)return;
+      const at=o.content.indexOf(m),ls=o.content.lastIndexOf('\n',at)+1,le=o.content.indexOf('\n',at);
+      if(!p.urls.has(m))p.urls.set(m,{url:m,count:1,where:[p.file],locs:[{file:p.file,kind:'page',n:1,snip:o.content.slice(ls,le<0?undefined:le).trim().slice(0,150)}]})})});
+  const rank={act:0,file:1,cls:2,res:3};
+  return [...P.values()].sort((a,b)=>(rank[a.kind]-rank[b.kind])||(b.urls.size-a.urls.size))}
+function vPages(){
+  const L=buildPages();window._pl=L;
+  if(pg!==null&&L[pg])return vPage(pg);
+  const nAct=L.filter(p=>p.kind==='act').length;
+  const btn=(p,i)=>`<button class="im" style="cursor:pointer;color:var(--ink);font:inherit;font-size:12px;${p.urls.size?'':'opacity:.5'}" onclick="pg=${i};tab('pages')"><div style="font-size:28px">${p.ic}</div><b>${esc(p.name)}</b><br><span class="b ${p.urls.size?'ok':''}">${p.urls.size} লিংক</span></button>`;
+  const sec=(t,k)=>{const l=L.map((p,i)=>[p,i]).filter(([p])=>k.includes(p.kind));return l.length?`<h3 class="sec">${t} (${l.length})</h3><div class="grid">${l.map(([p,i])=>btn(p,i)).join('')}</div>`:''};
+  $('#main').innerHTML=`<div class="note">💡 <b>পেজ</b> = অ্যাপের একেকটা স্ক্রিন (Activity), ওয়েব পেজ ফাইল ও কনফিগ ফাইল। যেকোনো পেজের বাটনে চাপুন — ওই পেজে কোন কোন লিংক আছে দেখাবে এবং সেখান থেকেই বদলাতে পারবেন।</div>
+  <div class="card mut">অ্যাপে ${nAct} টি স্ক্রিন (Activity) পাওয়া গেছে। ${L.filter(p=>p.kind==='act'&&p.urls.size).length} টিতে সরাসরি লিংক আছে। (ধূসর = লিংক নেই)</div>`+
+  sec('📱 অ্যাপের স্ক্রিন',['act'])+sec('🌐 ফাইল/ওয়েব পেজ',['file'])+sec('⚙️ হেল্পার/API ক্লাস',['cls'])+sec('🔤 রিসোর্স',['res'])}
+function vPage(i){
+  const p=window._pl[i],list=[...p.urls.values()];window._ul=list;
+  const fileOp=p.file&&ops.find(o=>o.t==='textfile'&&o.path===p.file);
+  $('#main').innerHTML=`<button class="btn sec sm" onclick="pg=null;tab('pages')">‹ সব পেজ</button>
+  <div class="card" style="margin-top:8px"><div style="font-size:30px">${p.ic}</div><b>${esc(p.name)}</b><div class="u mut">${esc(p.sub)}</div><div style="margin-top:6px"><span class="b ok">${list.length} টি লিংক</span></div>
+  ${p.kind==='file'&&p.file!=='AndroidManifest.xml'?`<div class="row"><button class="btn sec sm" onclick="openIn('${esc(p.file).replace(/'/g,"\\'")}')">📁 ফাইলটা পুরো খুলুন</button></div>`:''}
+  <div class="mut" style="margin-top:6px">${p.kind==='file'&&p.file!=='AndroidManifest.xml'?'"শুধু এই পেজে" বাটনে বদলালে অন্য পেজের একই লিংক বদলাবে না। "সব জায়গায়" বাটনে পুরো অ্যাপে বদলাবে।':'⚠ কোডের লিংক বদলালে অ্যাপের সব জায়গায় (সব পেজে) একই লিংক বদলে যাবে।'}</div></div>`+
+  (list.length?list.map((u,j)=>{const e=effUrl(u.url),ch=e!==u.url,op=getOp('str',u.url),k=urlType(u.url),mine=(u.locs||[]).filter(l=>l.kind==='code'?(l.owners||[]).some(c=>p.kind==='act'?topCls(c)===p.sub:p.kind==='cls'?topCls(c)===p.sub.split(' ')[0]:true):l.file===p.file||p.kind==='res');
+    const fo=p.kind==='file'&&p.file!=='AndroidManifest.xml';
+    return `<div class="card"><div><span class="b">${k[0]} ${k[1]}</span>${ch?'<span class="b ok">✓ পরিবর্তিত</span>':''}</div><div class="u" style="margin-top:4px">${esc(u.url)}</div>
+    ${(mine.length?mine:u.locs||[]).slice(0,3).map(x=>locHtml(u.url,x,S.package)).join('')}
+    <div class="row"><input type="text" id="u${j}" value="${esc(e)}" placeholder="নতুন লিংক" oninput="prevUrl(${j})"></div>
+    <div class="row">${fo?`<button class="btn sm" onclick="saveHere(${j},${i})">শুধু এই পেজে</button>`:''}<button class="btn ${fo?'sec ':''}sm" onclick="saveUrl(${j})">সব জায়গায়</button>${op?`<button class="btn sec sm" onclick="delIdx(${ops.indexOf(op)})">↺</button>`:''}</div>
+    <div id="p${j}">${ch?effHtml(u.url,e):'<div class="mut" style="margin-top:6px">নতুন লিংক লিখলে নিচে দেখাবে কোথায় কী বদলাবে।</div>'}</div></div>`}).join(''):'<div class="card mut">এই পেজে কোনো লিংক পাওয়া যায়নি।</div>')}
+async function saveHere(j,i){ // শুধু এই ফাইলে বদল
+  const p=window._pl[i],u=window._ul[j],v=$('#u'+j).value.trim();if(!v||v===u.url)return toast('কিছু বদলায়নি');
+  try{const old=ops.find(o=>o.t==='textfile'&&o.path===p.file);
+    const text=old?old.content:(await nat('readFile',{path:p.file})).text;
+    if(!text.includes(u.url))return toast('এই ফাইলে আর লিংকটা নেই (আগেই বদলানো?)');
+    ops=ops.filter(o=>!(o.t==='textfile'&&o.path===p.file));
+    ops.push({t:'textfile',path:p.file,content:text.split(u.url).join(v)});built=null;
+    upd();toast('✅ শুধু '+p.name+' এ বদলানো হয়েছে')}catch(e){fail(e)}}
 
 /* URLs */
 const NOISE=['schemas.android.com','www.w3.org','xmlpull.org','apache.org','developer.android.com','docs.oracle.com','purl.org','ns.adobe.com','example.com','localhost'];

@@ -108,7 +108,7 @@ final class Engine {
         try {
             Map<String, UrlInfo> umap = new LinkedHashMap<String, UrlInfo>();
             JSONObject out = new JSONObject();
-            JSONArray strings = new JSONArray(), colors = new JSONArray(), images = new JSONArray(), perms = new JSONArray();
+            JSONArray strings = new JSONArray(), colors = new JSONArray(), images = new JSONArray(), perms = new JSONArray(), activities = new JSONArray();
             ArscDoc arsc = null;
             String pkg = "", ver = "", minSdk = "";
             JSONObject label = new JSONObject();
@@ -148,6 +148,7 @@ final class Engine {
                     if (n.equals("AndroidManifest.xml")) {
                         final String[] info = new String[3];
                         final List<String> pl = new ArrayList<String>();
+                        final List<String> acts = new ArrayList<String>();
                         final int[] lab = {-1, 0, -1};
                         final String[] labRaw = {null};
                         x.walk(new BinXml.Visitor() {
@@ -157,6 +158,7 @@ final class Engine {
                                     if ("manifest".equals(name) && "versionName".equals(a.name)) info[1] = a.raw;
                                     if ("uses-sdk".equals(name) && "minSdkVersion".equals(a.name)) info[2] = String.valueOf(a.data);
                                     if ("application".equals(name) && "label".equals(a.name)) { lab[0] = a.type; lab[1] = a.data; labRaw[0] = a.raw; }
+                                    if (("activity".equals(name) || "activity-alias".equals(name)) && "name".equals(a.name) && a.raw != null && !acts.contains(a.raw)) acts.add(a.raw);
                                     if (name != null && name.startsWith("uses-permission") && "name".equals(a.name) && a.raw != null && !pl.contains(a.raw)) pl.add(a.raw);
                                 }
                                 return false;
@@ -166,6 +168,7 @@ final class Engine {
                         if (info[1] != null) ver = info[1];
                         if (info[2] != null) minSdk = info[2];
                         for (String p : pl) perms.put(p);
+                        for (String a : acts) activities.put(a.startsWith(".") ? (info[0] == null ? "" : info[0]) + a : (a.indexOf('.') < 0 && info[0] != null ? info[0] + "." + a : a));
                         if (lab[0] == 3 && labRaw[0] != null) label.put("value", labRaw[0]).put("pos", -1);
                         else if (lab[0] == 1 && arsc != null) {
                             ArscDoc.Entry le = arsc.byResId(lab[1]);
@@ -195,7 +198,7 @@ final class Engine {
                 for (JSONObject l : e.getValue().locs.values()) { locs.put(l); if (!contains(where, l.getString("file"))) where.put(l.getString("file")); }
                 urls.put(new JSONObject().put("url", e.getKey()).put("count", e.getValue().count).put("where", where).put("locs", locs));
             }
-            out.put("urls", urls).put("strings", strings).put("colors", colors).put("images", images).put("perms", perms)
+            out.put("urls", urls).put("strings", strings).put("colors", colors).put("images", images).put("perms", perms).put("activities", activities)
                     .put("label", label).put("package", pkg).put("versionName", ver).put("minSdk", minSdk)
                     .put("dexCount", dexCount).put("size", apk.length());
             return out;
